@@ -103,6 +103,7 @@ export class GuestRoomSession {
     this.connection?.close()
     const connection = this.peer.connect(this.options.roomId)
     this.connection = connection
+    this.startJoinTimeout()
 
     connection.onOpen(() => {
       if (this.stopped || this.connection !== connection) return
@@ -115,7 +116,6 @@ export class GuestRoomSession {
         },
       }
       connection.send(request)
-      this.startJoinTimeout()
     })
     connection.onData((data) => this.handleMessage(connection, data))
     connection.onClose(() => {

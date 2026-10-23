@@ -14,8 +14,6 @@ type RoomSessionConfig = {
 
 type ManagedSession = {
   key: string
-  references: number
-  cleanupTimer: ReturnType<typeof setTimeout> | null
   session: { start(): void; stop(sendLeave?: boolean): void }
 }
 
@@ -55,27 +53,22 @@ export function acquireRoomSession(config: RoomSessionConfig) {
     useRoomStore.getState().reset()
     useConnectionStore.getState().setConnection('STARTING')
     const session = createSession(config)
-    activeSession = { key, references: 0, cleanupTimer: null, session }
-    session.start()
-  }
-
-  if (activeSession.cleanupTimer) clearTimeout(activeSession.cleanupTimer)
-  activeSession.cleanupTimer = null
-  activeSession.references += 1
-
-  let released = false
-  return () => {
-    if (released || !activeSession || activeSession.key !== key) return
-    released = true
-    activeSession.references = Math.max(0, activeSession.references - 1)
-    if (activeSession.references > 0) return
-
-    activeSession.cleanupTimer = setTimeout(() => {
-      if (!activeSession || activeSession.key !== key || activeSession.references > 0) return
-      activeSession.session.stop(false)
+    activeSession = { key, session }
+    try {
+      session.start()
+    } catch (error) {
+      console.error('Failed to start the P2P room session:', error)
       activeSession = null
-    }, 250)
+      useConnectionStore
+        .getState()
+        .setConnection('ERROR', 'P2P could not start in this browser. Reload and try again.')
+    }
   }
+
+  // The session is intentionally not tied to React effect cleanup. StrictMode and
+  // route hydration can run transient cleanups while the user is still in the room.
+  // It is stopped explicitly on leave, when another room is acquired, or on pagehide.
+  return () => undefined
 }
 
 export function leaveActiveRoom() {

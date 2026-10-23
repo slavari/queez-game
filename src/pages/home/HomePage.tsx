@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 
 import heroBackground from '@/assets/game-world-hero.jpg'
 import { useIdentityStore } from '@/features/participants/model/identity-store'
+import { leaveActiveRoom } from '@/features/p2p/services/room-session-controller'
 import { createRoomId, parseRoomReference } from '@/features/room/lib/room-id'
 import { SteamProfileForm } from '@/features/steam-profile/ui/SteamProfileForm'
 
@@ -164,6 +165,10 @@ function LobbyStartPanel() {
 }
 
 export function HomePage() {
+  useEffect(() => {
+    leaveActiveRoom()
+  }, [])
+
   return (
     <main className="relative isolate min-h-dvh overflow-hidden bg-[#06080c] text-white">
       <img

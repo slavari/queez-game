@@ -215,6 +215,49 @@ describe('host and guest room sessions', () => {
     expect(destroyed).toHaveBeenCalled()
   })
 
+  it('times out when signaling succeeds but the WebRTC data channel never opens', async () => {
+    vi.useFakeTimers()
+    const close = vi.fn()
+    const destroy = vi.fn()
+    const statuses: string[] = []
+    const roomId = 'gp-1234567890abcdefghijklmn'
+    const dormantConnection: P2PConnection = {
+      remotePeerId: roomId,
+      open: false,
+      send: vi.fn(),
+      close,
+      onOpen: () => undefined,
+      onData: () => undefined,
+      onClose: () => undefined,
+      onError: () => undefined,
+    }
+    const peer: P2PPeer = {
+      connect: () => dormantConnection,
+      destroy,
+      onOpen: (callback) => queueMicrotask(() => callback('guest-test-peer')),
+      onConnection: () => undefined,
+      onError: () => undefined,
+      onDisconnected: () => undefined,
+    }
+
+    new GuestRoomSession({
+      roomId,
+      participantId: 'participant-guest-123',
+      profile: guestProfile,
+      peerFactory: () => peer,
+      joinTimeoutMs: 25,
+      retryDelaysMs: [],
+      onSnapshot: () => undefined,
+      onStatus: (status) => statuses.push(status),
+    }).start()
+
+    await vi.advanceTimersByTimeAsync(25)
+
+    expect(statuses).toEqual(['STARTING', 'HOST_UNAVAILABLE'])
+    expect(close).toHaveBeenCalled()
+    expect(destroy).toHaveBeenCalled()
+  })
+
   it('joins, synchronizes, disconnects, reconnects and ignores stale snapshots', async () => {
     vi.useFakeTimers()
     const network = new FakeNetwork()

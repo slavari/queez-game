@@ -50,7 +50,16 @@ class PeerJsPeer implements P2PPeer {
   private readonly peer: Peer
 
   constructor(peerId?: string) {
-    const options = { debug: 1 }
+    const options = {
+      debug: import.meta.env.DEV ? 3 : 1,
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.cloudflare.com:3478' },
+          { urls: 'stun:stun.l.google.com:19302' },
+        ],
+        sdpSemantics: 'unified-plan' as const,
+      },
+    }
     this.peer = peerId ? new Peer(peerId, options) : new Peer(options)
   }
 
