@@ -19,8 +19,12 @@
 - Use path aliases for cross-module imports and relative imports inside a small local module.
 - Keep dependencies minimal. Add PeerJS, Steam clients, validators, or infrastructure packages only
   when an implemented use case requires them.
-- Run `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm run test`, and
-  `npm run build` before handing off changes.
+- Keep PeerJS behind the P2P transport/session layer; React components consume stores and session
+  controllers rather than calling PeerJS directly.
+- Treat the host as the authoritative room-state owner. Validate message version, type, payload,
+  size, participant identity, and duplicate Steam profiles at the host boundary.
+- Run `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm test`, and `pnpm build` before
+  handing off changes.
 
 ## Platform constraints
 
