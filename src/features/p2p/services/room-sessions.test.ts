@@ -165,6 +165,56 @@ const flushMessages = async () => {
 describe('host and guest room sessions', () => {
   afterEach(() => vi.useRealTimers())
 
+  it('times out signaling startup instead of loading forever', async () => {
+    vi.useFakeTimers()
+    const destroyed = vi.fn()
+    const silentPeer: P2PPeer = {
+      connect: () => {
+        throw new Error('Not opened')
+      },
+      destroy: destroyed,
+      onOpen: () => undefined,
+      onConnection: () => undefined,
+      onError: () => undefined,
+      onDisconnected: () => undefined,
+    }
+    const hostStatuses: string[] = []
+    const guestStatuses: string[] = []
+    const requestedPeerIds: Array<string | undefined> = []
+    const roomId = 'gp-1234567890abcdefghijklmn'
+
+    new HostRoomSession({
+      roomId,
+      participantId: 'participant-host-123',
+      profile: hostProfile,
+      peerFactory: () => silentPeer,
+      startTimeoutMs: 25,
+      onSnapshot: () => undefined,
+      onStatus: (status) => hostStatuses.push(status),
+    }).start()
+
+    new GuestRoomSession({
+      roomId,
+      participantId: 'participant-guest-123',
+      profile: guestProfile,
+      peerFactory: (peerId) => {
+        requestedPeerIds.push(peerId)
+        return silentPeer
+      },
+      peerOpenTimeoutMs: 25,
+      retryDelaysMs: [],
+      onSnapshot: () => undefined,
+      onStatus: (status) => guestStatuses.push(status),
+    }).start()
+
+    await vi.advanceTimersByTimeAsync(25)
+
+    expect(hostStatuses.at(-1)).toBe('ERROR')
+    expect(guestStatuses.at(-1)).toBe('HOST_UNAVAILABLE')
+    expect(requestedPeerIds[0]).toMatch(/^guest-[a-z0-9]{24}$/)
+    expect(destroyed).toHaveBeenCalled()
+  })
+
   it('joins, synchronizes, disconnects, reconnects and ignores stale snapshots', async () => {
     vi.useFakeTimers()
     const network = new FakeNetwork()
@@ -197,6 +247,7 @@ describe('host and guest room sessions', () => {
     await flushMessages()
 
     expect(guestStatuses).toContain('CONNECTED')
+    expect([...network.peers.keys()].some((peerId) => peerId.startsWith('guest-'))).toBe(true)
     expect(hostSnapshots.at(-1)?.participants).toHaveLength(2)
     expect(hostSnapshots.at(-1)?.participants[0]?.role).toBe('HOST')
     expect(hostSnapshots.at(-1)?.participants[1]?.role).toBe('GUEST')

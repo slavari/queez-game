@@ -16,6 +16,7 @@ type HostRoomSessionOptions = {
   profile: SteamProfile
   peerFactory: PeerFactory
   disconnectGraceMs?: number
+  startTimeoutMs?: number
   onSnapshot: (room: RoomSnapshot) => void
   onStatus: (status: SessionStatus, message?: string) => void
 }
@@ -27,6 +28,7 @@ export class HostRoomSession {
   private readonly participantConnections = new Map<string, P2PConnection>()
   private readonly connectionParticipants = new Map<P2PConnection, string>()
   private readonly disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private startTimer: ReturnType<typeof setTimeout> | null = null
   private stopped = false
 
   constructor(private readonly options: HostRoomSessionOptions) {
@@ -48,18 +50,33 @@ export class HostRoomSession {
   start() {
     if (this.peer || this.stopped) return
     this.options.onStatus('STARTING')
-    this.peer = this.options.peerFactory(this.options.roomId)
-    this.peer.onOpen(() => {
-      if (this.stopped) return
+    const peer = this.options.peerFactory(this.options.roomId)
+    this.peer = peer
+    this.startTimer = setTimeout(() => {
+      if (this.stopped || this.peer !== peer) return
+      this.options.onStatus(
+        'ERROR',
+        'The signaling service did not respond. Check your network and try again.',
+      )
+      peer.destroy()
+      this.peer = null
+    }, this.options.startTimeoutMs ?? 12_000)
+    peer.onOpen(() => {
+      if (this.stopped || this.peer !== peer) return
+      this.clearStartTimer()
       this.options.onSnapshot(this.snapshot())
       this.options.onStatus('CONNECTED')
     })
-    this.peer.onConnection((connection) => this.attachConnection(connection))
-    this.peer.onDisconnected(() => {
-      if (!this.stopped) this.options.onStatus('ERROR', 'PeerJS signaling connection was lost.')
+    peer.onConnection((connection) => {
+      if (this.peer === peer) this.attachConnection(connection)
     })
-    this.peer.onError((error) => {
-      if (this.stopped) return
+    peer.onDisconnected(() => {
+      if (!this.stopped && this.peer === peer)
+        this.options.onStatus('ERROR', 'PeerJS signaling connection was lost.')
+    })
+    peer.onError((error) => {
+      if (this.stopped || this.peer !== peer) return
+      this.clearStartTimer()
       const message =
         error.type === 'unavailable-id'
           ? 'This room ID is already in use. Create a new room.'
@@ -71,12 +88,18 @@ export class HostRoomSession {
   stop() {
     if (this.stopped) return
     this.stopped = true
+    this.clearStartTimer()
     for (const timer of this.disconnectTimers.values()) clearTimeout(timer)
     this.disconnectTimers.clear()
     for (const connection of this.connections) connection.close()
     this.connections.clear()
     this.peer?.destroy()
     this.peer = null
+  }
+
+  private clearStartTimer() {
+    if (this.startTimer) clearTimeout(this.startTimer)
+    this.startTimer = null
   }
 
   private attachConnection(connection: P2PConnection) {

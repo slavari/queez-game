@@ -6,6 +6,7 @@ import {
 import type { P2PConnection, P2PPeer, PeerFactory } from '@/features/p2p/transport/types'
 import type { RoomSnapshot } from '@/features/room/model/types'
 import type { SteamProfile } from '@/features/steam-profile/model/types'
+import { createSecureId } from '@/shared/lib/ids'
 
 type GuestStatus =
   'STARTING' | 'CONNECTED' | 'RECONNECTING' | 'HOST_UNAVAILABLE' | 'REJECTED' | 'ERROR'
@@ -17,6 +18,7 @@ type GuestRoomSessionOptions = {
   peerFactory: PeerFactory
   retryDelaysMs?: number[]
   joinTimeoutMs?: number
+  peerOpenTimeoutMs?: number
   onSnapshot: (room: RoomSnapshot) => void
   onStatus: (status: GuestStatus, message?: string) => void
 }
@@ -32,6 +34,7 @@ export class GuestRoomSession {
   private connection: P2PConnection | null = null
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private joinTimer: ReturnType<typeof setTimeout> | null = null
+  private peerOpenTimer: ReturnType<typeof setTimeout> | null = null
   private attempt = 0
   private currentVersion = 0
   private stopped = false
@@ -47,10 +50,17 @@ export class GuestRoomSession {
 
   private startPeer() {
     if (this.peer || this.stopped || this.terminal) return
-    const peer = this.options.peerFactory()
+    const peer = this.options.peerFactory(createSecureId('guest-', 24))
     this.peer = peer
+    this.peerOpenTimer = setTimeout(() => {
+      if (this.peer === peer) {
+        this.scheduleReconnect('The signaling service did not respond.')
+      }
+    }, this.options.peerOpenTimeoutMs ?? 10_000)
     peer.onOpen(() => {
-      if (this.peer === peer) this.connectToHost()
+      if (this.peer !== peer) return
+      this.clearPeerOpenTimeout()
+      this.connectToHost()
     })
     peer.onDisconnected(() => {
       if (this.peer === peer) this.scheduleReconnect('The signaling service disconnected.')
@@ -71,6 +81,7 @@ export class GuestRoomSession {
     this.stopped = true
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
     if (this.joinTimer) clearTimeout(this.joinTimer)
+    this.clearPeerOpenTimeout()
 
     if (sendLeave && this.connection?.open) {
       const message: ClientMessage = {
@@ -162,17 +173,28 @@ export class GuestRoomSession {
     this.joinTimer = null
   }
 
+  private clearPeerOpenTimeout() {
+    if (this.peerOpenTimer) clearTimeout(this.peerOpenTimer)
+    this.peerOpenTimer = null
+  }
+
   private scheduleReconnect(message: string) {
     if (this.stopped || this.terminal || this.reconnectTimer) return
     this.clearJoinTimeout()
+    this.clearPeerOpenTimeout()
     const delays = this.options.retryDelaysMs ?? [1_000, 2_000, 4_000, 8_000, 10_000]
     const delay = delays[this.attempt]
 
     if (delay === undefined) {
+      this.terminal = true
       this.options.onStatus(
         'HOST_UNAVAILABLE',
         'The host is unavailable. Check the invite link or try later.',
       )
+      this.connection?.close()
+      this.connection = null
+      this.peer?.destroy()
+      this.peer = null
       return
     }
 
